@@ -1190,7 +1190,7 @@ HRESULT SuperText::CreateWindowSizeDependentResources(int nWidth, int nHeight)
 {
     HRESULT hr = S_OK;
 
-    if (m_pDevice && m_pSwapChain)
+    if (m_pDevice) // The swap chain is null when frames are copied to the window with GDI.
     {
         if (SUCCEEDED(hr))
         {

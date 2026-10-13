@@ -303,7 +303,25 @@ void DeviceResources::CreateWindowSizeDependentResources()
     const UINT backBufferHeight = std::max<UINT>(static_cast<UINT>(m_outputSize.bottom - m_outputSize.top), 1u);
     const DXGI_FORMAT backBufferFormat = (m_options & (c_FlipPresent | c_AllowTearing | c_EnableHDR)) ? NoSRGB(m_backBufferFormat) : m_backBufferFormat;
 
-    if (m_swapChain)
+    if (m_options & c_GdiPresent)
+    {
+        // Render to an off-screen texture and copy it to the window with GDI in `Present()`.
+        // Without a swap chain, GPU drivers do not treat the host application as a game, so
+        // variable refresh rate (G-SYNC/FreeSync) and game overlays do not engage.
+        m_gdiStaging.Reset();
+
+        CD3D11_TEXTURE2D_DESC renderTargetDesc(m_backBufferFormat,
+                                               backBufferWidth,
+                                               backBufferHeight,
+                                               1, // Use a single array entry.
+                                               1, // Use a single mipmap level.
+                                               D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+        ThrowIfFailed(m_d3dDevice->CreateTexture2D(&renderTargetDesc, nullptr, m_renderTarget.ReleaseAndGetAddressOf()));
+
+        CD3D11_TEXTURE2D_DESC stagingDesc(m_backBufferFormat, backBufferWidth, backBufferHeight, 1, 1, 0, D3D11_USAGE_STAGING, D3D11_CPU_ACCESS_READ);
+        ThrowIfFailed(m_d3dDevice->CreateTexture2D(&stagingDesc, nullptr, m_gdiStaging.ReleaseAndGetAddressOf()));
+    }
+    else if (m_swapChain)
     {
         // If the swap chain already exists, resize it.
         HRESULT hr = m_swapChain->ResizeBuffers(m_backBufferCount,
@@ -362,8 +380,11 @@ void DeviceResources::CreateWindowSizeDependentResources()
     // Handle color space settings for HDR.
     UpdateColorSpace();
 
-    // Create a render target view of the swap chain back buffer.
-    ThrowIfFailed(m_swapChain->GetBuffer(0, IID_PPV_ARGS(m_renderTarget.ReleaseAndGetAddressOf())));
+    // Create a render target view of the swap chain back buffer (or of the off-screen texture).
+    if (m_swapChain)
+    {
+        ThrowIfFailed(m_swapChain->GetBuffer(0, IID_PPV_ARGS(m_renderTarget.ReleaseAndGetAddressOf())));
+    }
 
     CD3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc(D3D11_RTV_DIMENSION_TEXTURE2D, m_backBufferFormat);
     ThrowIfFailed(m_d3dDevice->CreateRenderTargetView(m_renderTarget.Get(), &renderTargetViewDesc, m_d3dRenderTargetView.ReleaseAndGetAddressOf()));
@@ -395,7 +416,7 @@ void DeviceResources::CreateWindowSizeDependentResources()
                           NULL);
 
     ComPtr<IDXGIResource1> dxgiBackBuffer;
-    ThrowIfFailed(m_swapChain->GetBuffer(0, IID_PPV_ARGS(dxgiBackBuffer.ReleaseAndGetAddressOf())));
+    ThrowIfFailed(m_renderTarget.As(&dxgiBackBuffer));
 
     ComPtr<IDXGISurface2> dxgiSurface;
     ThrowIfFailed(dxgiBackBuffer->CreateSubresourceSurface(0, dxgiSurface.ReleaseAndGetAddressOf()));
@@ -465,6 +486,7 @@ bool DeviceResources::WindowSwap(HWND window, int width, int height)
     m_d3dRenderTargetView.Reset();
     m_renderTarget.Reset();
     m_depthStencil.Reset();
+    m_gdiStaging.Reset();
     m_swapChain.Reset();
 
     SetWindow(window, 0, 0);
@@ -486,6 +508,7 @@ void DeviceResources::HandleDeviceLost()
     m_d3dRenderTargetView.Reset();
     m_renderTarget.Reset();
     m_depthStencil.Reset();
+    m_gdiStaging.Reset();
     m_swapChain.Reset();
     m_d3dContext.Reset();
     m_d3dAnnotation.Reset();
@@ -514,11 +537,51 @@ void DeviceResources::HandleDeviceLost()
     }
 }
 
+// Copy the off-screen render target to the window with GDI.
+HRESULT DeviceResources::PresentGdi()
+{
+    if (!m_gdiStaging || !m_window)
+        return S_OK;
+
+    m_d3dContext->CopyResource(m_gdiStaging.Get(), m_renderTarget.Get());
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    HRESULT hr = m_d3dContext->Map(m_gdiStaging.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr))
+        return hr;
+
+    const int width = static_cast<int>(std::max<long>(m_outputSize.right - m_outputSize.left, 1l));
+    const int height = static_cast<int>(std::max<long>(m_outputSize.bottom - m_outputSize.top, 1l));
+
+    // 32-bit top-down DIB over the mapped rows; the row pitch may be wider than the image.
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = static_cast<LONG>(mapped.RowPitch / 4);
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    HDC hdc = GetDC(m_window);
+    if (hdc)
+    {
+        StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height, mapped.pData, &bmi, DIB_RGB_COLORS, SRCCOPY);
+        ReleaseDC(m_window, hdc);
+    }
+
+    m_d3dContext->Unmap(m_gdiStaging.Get(), 0);
+    return S_OK;
+}
+
 // Present the contents of the swap chain to the screen.
 void DeviceResources::Present()
 {
     HRESULT hr = E_FAIL;
-    if (m_options & c_AllowTearing)
+    if (m_options & c_GdiPresent)
+    {
+        hr = PresentGdi();
+    }
+    else if (m_options & c_AllowTearing)
     {
         // Recommended to always use tearing if supported when using a sync interval of 0.
         hr = m_swapChain->Present(0, DXGI_PRESENT_ALLOW_TEARING);

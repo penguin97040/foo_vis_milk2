@@ -46,6 +46,11 @@ DXContext::DXContext(HWND hWndWinamp, DXCONTEXT_PARAMS* pParams) noexcept(false)
     // Clear the active flag.
     m_ready = FALSE;
 
+    // Draw off-screen and copy each frame to the window with GDI when the back buffer is
+    // 8-bit BGRA (the default), so GPU drivers do not engage G-SYNC/FreeSync or game overlays
+    // for the host application. Other formats (sRGB, HDR) keep the flip-model swap chain.
+    const bool gdiPresent = m_current_mode.back_buffer_format == DXGI_FORMAT_B8G8R8A8_UNORM;
+
     // Create the device.
     // Provide parameters for swap chain format, depth/stencil format, and back buffer count.
     m_deviceResources = std::make_unique<DX::DeviceResources>(
@@ -53,8 +58,9 @@ DXContext::DXContext(HWND hWndWinamp, DXCONTEXT_PARAMS* pParams) noexcept(false)
         m_current_mode.depth_buffer_format, // depthBufferFormat (default: DXGI_FORMAT_D24_UNORM_S8_UINT)
         m_current_mode.back_buffer_count, // backBufferCount (default: 2)
         m_current_mode.min_feature_level, // minFeatureLevel (default: D3D_FEATURE_LEVEL_9_1)
-        DX::DeviceResources::c_FlipPresent | ((m_current_mode.allow_page_tearing << 1) & DX::DeviceResources::c_AllowTearing) |
-            ((m_current_mode.enable_hdr << 2) & DX::DeviceResources::c_EnableHDR) // flags (default: flip, noTearing, noHDR)
+        gdiPresent ? DX::DeviceResources::c_GdiPresent
+                   : DX::DeviceResources::c_FlipPresent | ((m_current_mode.allow_page_tearing << 1) & DX::DeviceResources::c_AllowTearing) |
+                         ((m_current_mode.enable_hdr << 2) & DX::DeviceResources::c_EnableHDR) // flags (default: GDI; else flip, noTearing, noHDR)
     );
 }
 

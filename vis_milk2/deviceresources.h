@@ -26,6 +26,7 @@ class DeviceResources
     static constexpr unsigned int c_FlipPresent = 0x1;
     static constexpr unsigned int c_AllowTearing = 0x2;
     static constexpr unsigned int c_EnableHDR = 0x4;
+    static constexpr unsigned int c_GdiPresent = 0x8; // Render off-screen and copy each frame to the window with GDI (no swap chain).
 
     DeviceResources(DXGI_FORMAT backBufferFormat = DXGI_FORMAT_B8G8R8A8_UNORM,
                     DXGI_FORMAT depthBufferFormat = DXGI_FORMAT_D32_FLOAT,
@@ -91,6 +92,7 @@ class DeviceResources
 
   private:
     void CreateFactory();
+    HRESULT PresentGdi();
     void GetHardwareAdapter(IDXGIAdapter1** ppAdapter);
 
     // Direct3D objects.
@@ -103,6 +105,7 @@ class DeviceResources
     // Direct3D rendering objects. Required for 3D.
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_renderTarget;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthStencil;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_gdiStaging;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_d3dRenderTargetView;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_d3dDepthStencilView;
     D3D11_VIEWPORT m_screenViewport;
