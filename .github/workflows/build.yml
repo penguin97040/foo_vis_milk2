@@ -17,7 +17,7 @@ on:
 jobs:
   build:
     name: Build and test library
-    runs-on: windows-latest
+    runs-on: windows-2022 # has VS 2022 with ATL, which the validate step also expects
     continue-on-error: ${{ (matrix.platform == 'ARM64') || (matrix.platform == 'ARM64EC') }}
     strategy:
       matrix:
@@ -133,7 +133,7 @@ jobs:
   package:
     name: Package foobar2000 MilkDrop 2 component
     needs: build
-    runs-on: windows-latest
+    runs-on: windows-2022 # has VS 2022 with ATL, which the validate step also expects
     steps:
       - name: Clone foo_vis_milk2 repository
         uses: actions/checkout@v4
