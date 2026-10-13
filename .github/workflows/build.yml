@@ -69,7 +69,7 @@ jobs:
         with:
           repository: projectM-visualizer/projectm-eval
           path: external/projectm-eval
-          ref: master
+          ref: ee180a2473c12856fd25dc754bafdab7e843cc7a # last commit before this repo's master (16/11/2024); pmeel.patch no longer applies to newer ones
       - name: Patch projectm-eval repository
         run: |
           Set-Location -Path "$(Get-Location)\external\projectm-eval"
